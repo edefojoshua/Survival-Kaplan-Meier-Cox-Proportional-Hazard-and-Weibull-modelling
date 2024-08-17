@@ -1,0 +1,247 @@
+---
+title: "Survival (Kaplain Meier, Cox Proportional, and Weibull) modelling"
+author: "Joshua Edefo"
+date: "2024-08-17"
+email: "edefojoshua2000@yahoo.com"
+output: github_document
+---
+Libraries
+
+```{r a, message=FALSE}
+library(survival)
+library(survminer)  # For enhanced survival plots
+library(usethis)
+```
+
+Load the lung dataset
+
+```{r b}
+lung
+data <- lung
+data
+head(data)
+str(data)
+
+```
+
+Kaplan-Meier model estimator for overall survival
+
+```{r c}
+km_fit <- survfit(Surv(time, status) ~ 1, data = lung)
+km_fit
+
+# Summary of Kaplan-Meier fit
+summary(km_fit)
+
+# Kaplan-Meier survival plot
+ggsurvplot(km_fit, data = lung, 
+           xlab = "Time (days)", 
+           ylab = "Survival Probability", 
+           title = "Kaplan-Meier Survival Curve",
+           conf.int = TRUE)
+
+# Kaplan-Meier estimator stratified by sex and performance status
+km_fit_stratified <- survfit(Surv(time, status) ~ sex + ph.ecog, data = lung)
+
+# Plot survival curves for covariates
+ggsurvplot(km_fit_stratified, data = lung, 
+           pval = TRUE,
+           conf.int = TRUE,
+           facet.by = "sex", 
+           xlab = "Time (days)", 
+           ylab = "Survival Probability",
+           title = "Kaplan-Meier Survival Curves by Sex and Performance Status")
+
+```
+
+Cox proportional hazards model
+
+```{r d}
+# Fit Cox proportional hazards model
+cox_model <- coxph(Surv(time, status) ~ sex + age + ph.ecog, data = lung)
+
+# Summary of the Cox model
+summary(cox_model)
+
+# Test proportional hazards assumption
+cox_ph_test <- cox.zph(cox_model)
+cox_ph_test
+
+# Plot Schoenfeld residuals to check for proportional hazards assumption
+ggcoxzph(cox_ph_test)
+
+# Calculate survival function using the fitted Cox model
+surv_fit <- survfit(cox_model, newdata = lung)
+
+# Plot the survival function
+ggsurvplot(surv_fit, data = lung,
+           xlab = "Time (days)",
+           ylab = "Survival Probability",
+           title = "Survival Function from Cox Proportional Hazards Model",
+           conf.int = TRUE)
+
+# Get the baseline hazard function
+baseline_hazard <- basehaz(cox_model, centered = FALSE)
+
+# Plot the baseline hazard function
+plot(baseline_hazard$time, baseline_hazard$hazard, type = "l",
+     xlab = "Time (days)",
+     ylab = "Baseline Hazard Rate",
+     main = "Baseline Hazard Function from Cox Model")
+
+# Calculate hazard ratios for specific covariates
+# Example: setting covariates for a particular patient profile
+newdata <- data.frame(sex = 1, age = 60, ph.ecog = 1)  # Example covariate values
+hazard_rate <- exp(predict(cox_model, newdata = newdata, type = "lp"))
+hazard_rate
+# Print the hazard rate for the new data
+print(paste("Hazard rate for specified covariates: ", hazard_rate))
+
+
+```
+
+Weibull model
+
+```{r e}
+# Fit Weibull survival model
+weibull_model <- survreg(Surv(time, status) ~ sex + age + ph.ecog, data = lung, dist = "weibull")
+
+# Summary of the Weibull model
+summary(weibull_model)
+# test for assumptions
+# Extract the shape parameter from the Weibull model
+shape_param <- weibull_model$scale
+shape_param
+cat("Shape parameter (scale):", shape_param, "\n")
+
+# Q-Q Plot for Weibull Model
+# Extract the linear predictor (log-scale survival times)
+lp <- predict(weibull_model, type = "lp")
+
+# Compute the expected Weibull quantiles
+expected_quantiles <- qweibull(ppoints(length(lp)), shape_param, scale = weibull_model$scale)
+
+# Plot Q-Q plot
+qqplot(expected_quantiles, lp, main = "Q-Q Plot for Weibull Model", 
+       xlab = "Theoretical Quantiles", ylab = "Observed Quantiles")
+abline(0, 1, col = "red")  # Add a 45-degree line
+
+# Compute residuals
+residuals_weibull <- residuals(weibull_model)
+
+# Plot residuals
+plot(residuals_weibull, main = "Residuals for Weibull Model", 
+     xlab = "Index", ylab = "Residuals")
+
+# somewhat fit, so lets go back to the model
+# Fit a Weibull survival model using three covariates
+weibull_model <- survreg(Surv(time, status) ~ sex + age + ph.ecog, data = lung, dist = "weibull")
+summary(weibull_model)
+
+# Extract Weibull model parameters
+shape_param <- 1 / weibull_model$scale  # Shape parameter (inverse of scale from survreg)
+coefficients <- weibull_model$coefficients  # Regression coefficients
+intercept <- coefficients["(Intercept)"]  # Intercept
+scale_param <- exp(intercept)  # Scale parameter
+
+# Function to calculate the survival function
+weibull_surv_function <- function(t, shape, scale, lp) {
+  exp(-((t / exp(lp))^shape))
+}
+
+# Function to calculate the hazard function
+weibull_hazard_function <- function(t, shape, scale, lp) {
+  shape * (t^(shape - 1)) / exp(lp)
+}
+
+# Define covariate profiles for prediction
+newdata1 <- data.frame(sex = 1, age = 60, ph.ecog = 1)  # Profile 1: Male, Age 60, ECOG 1
+newdata2 <- data.frame(sex = 2, age = 70, ph.ecog = 2)  # Profile 2: Female, Age 70, ECOG 2
+newdata3 <- data.frame(sex = 1, age = 50, ph.ecog = 0)  # Profile 3: Male, Age 50, ECOG 0
+
+# Ensure that newdata1 is numeric
+newdata1 <- as.numeric(as.matrix(newdata1))
+
+# Ensure coefficients are in numeric form
+coefficients <- as.numeric(weibull_model$coefficients)
+
+# Estimating linear_predictor 1
+# Define covariate profile for prediction (single row)
+newdata1 <- data.frame(sex = 1, age = 60, ph.ecog = 1)  # Profile 1: Male, Age 60, ECOG 1
+
+# Extract the coefficients (including the intercept)
+coefficients <- weibull_model$coefficients
+
+# Ensure the newdata1 data frame has the same variables as the model
+newdata1 <- newdata1[, names(coefficients)[-1], drop = FALSE]  # Ensure order matches the model
+
+# Add intercept to newdata1 for matrix multiplication
+lp1 <- as.vector(cbind(1, as.matrix(newdata1)) %*% coefficients)
+lp1
+
+
+# Estimating linear_predictor 2
+newdata2 <- data.frame(sex = 2, age = 70, ph.ecog = 2)  # Profile 2: Female, Age 70, ECOG 2
+
+# Extract the coefficients (including the intercept)
+coefficients <- weibull_model$coefficients
+
+# Ensure the newdata1 data frame has the same variables as the model
+newdata1 <- newdata1[, names(coefficients)[-1], drop = FALSE]  # Ensure order matches the model
+
+# Add intercept to newdata1 for matrix multiplication
+lp2 <- as.vector(cbind(1, as.matrix(newdata2)) %*% coefficients)
+lp2
+
+# Estimating linear_predictor 3
+# Define covariate profile for prediction (single row)
+newdata3 <- data.frame(sex = 1, age = 50, ph.ecog = 0)  # Profile 3: Male, Age 50, ECOG 0
+
+# Extract the coefficients (including the intercept)
+coefficients <- weibull_model$coefficients
+
+# Ensure the newdata3 data frame has the same variables as the model in the correct order
+newdata3 <- newdata3[, names(coefficients)[-1], drop = FALSE]
+
+# Add intercept to newdata3 for matrix multiplication
+lp3 <- as.vector(cbind(1, as.matrix(newdata3)) %*% coefficients)
+lp3
+
+# Define time points for plotting
+time_points <- seq(0, max(lung$time), length.out = 100)
+
+# Calculate survival curves for each profile
+surv_curve1 <- weibull_surv_function(time_points, shape_param, scale_param, lp1)
+surv_curve2 <- weibull_surv_function(time_points, shape_param, scale_param, lp2)
+surv_curve3 <- weibull_surv_function(time_points, shape_param, scale_param, lp3)
+
+# Plot survival curves
+plot(time_points, surv_curve1, type = "l", col = "blue", ylim = c(0, 1),
+     xlab = "Time (days)", ylab = "Survival Probability",
+     main = "Survival Curves from Weibull Model")
+lines(time_points, surv_curve2, col = "red")
+lines(time_points, surv_curve3, col = "green")
+legend("topright", legend = c("Profile 1", "Profile 2", "Profile 3"), col = c("blue", "red", "green"), lty = 1)
+
+# Calculate hazard curves for each profile
+hazard_curve1 <- weibull_hazard_function(time_points, shape_param, scale_param, lp1)
+hazard_curve2 <- weibull_hazard_function(time_points, shape_param, scale_param, lp2)
+hazard_curve3 <- weibull_hazard_function(time_points, shape_param, scale_param, lp3)
+
+# Plot hazard curves
+plot(time_points, hazard_curve1, type = "l", col = "blue",
+     xlab = "Time (days)", ylab = "Hazard Rate",
+     main = "Hazard Curves from Weibull Model")
+lines(time_points, hazard_curve2, col = "red")
+lines(time_points, hazard_curve3, col = "green")
+legend("topright", legend = c("Profile 1", "Profile 2", "Profile 3"), col = c("blue", "red", "green"), lty = 1)
+
+
+```
+
+session information
+
+```{r f}
+sessionInfo()
+
+```
